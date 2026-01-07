@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Grep",
+        "command": "echo 'BLOCKED: Use the code-search Skill instead. Run: greppy search \"query\" for semantic search, or greppy exact \"pattern\" for exact matches.'",
+        "decision": "block"
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(greppy:*)",
+      "Bash(npx greppy:*)"
+    ]
+  }
+}
