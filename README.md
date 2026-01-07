@@ -4,6 +4,8 @@ Semantic code search CLI using ChromaDB + Ollama. Integrates with Claude Code vi
 
 **No Docker required.** Everything runs locally.
 
+![Greppy Demo](experiment.gif)
+
 ## Architecture
 
 ```
