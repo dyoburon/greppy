@@ -28,9 +28,20 @@ ollama pull nomic-embed-text
 
 ### 2. Install Greppy
 
+**Option A: Via Homebrew (recommended)**
 ```bash
-cd /Users/dylan/Desktop/projects/greppy
-pip install -e .
+brew tap dyoburon/greppy
+brew install greppy
+```
+
+**Option B: Via pip**
+```bash
+pip install -e /path/to/greppy
+```
+
+**Option C: Via pipx**
+```bash
+pipx install /path/to/greppy
 ```
 
 ### 3. Verify Installation
@@ -90,72 +101,113 @@ greppy clear
 
 ## Claude Code Integration
 
-### Two-Layer Protection
+### Setup
 
-**Layer 1: Skill (Proactive)**
+Create a `.claude` folder in your project with these files:
 
-The `code-search` Skill automatically activates when your query matches:
+#### 1. `.claude/settings.json`
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'BLOCKED: Use greppy instead. Run: greppy search \"query\" for semantic search, or greppy exact \"pattern\" for exact matches.' && exit 1"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(greppy:*)"
+    ]
+  }
+}
+```
+
+#### 2. `.claude/skills/code-search/SKILL.md`
+
+```markdown
+---
+name: code-search
+description: Semantic code search for finding code by meaning. Use when searching for concepts, logic, patterns, or asking "where is X handled" or "find code that does Y".
+allowed-tools: Bash(greppy:*), Read, Glob
+---
+
+# Code Search Skill
+
+## When to Use This Skill
+
+Use `greppy` for:
+- Finding code by concept ("authentication logic", "error handling")
+- Exploring unfamiliar codebases
+- Searching by intent, not exact text
+
+Use `greppy exact` for:
+- Specific strings, function names, imports
+- TODOs, FIXMEs, exact patterns
+
+## Commands
+
+### Semantic Search
+\`\`\`bash
+greppy search "your query" -n 10
+\`\`\`
+
+### Exact Match
+\`\`\`bash
+greppy exact "pattern"
+\`\`\`
+```
+
+#### 3. Add to `CLAUDE.md` (recommended)
+
+Add this to your project's `CLAUDE.md` file:
+
+```markdown
+## Code Search - IMPORTANT
+
+**Always use `greppy` for searching code in this codebase.** Do NOT use Glob, Grep, find, or the Explore agent.
+
+\`\`\`bash
+# Semantic search (find by meaning/concept)
+greppy search "authentication logic"
+
+# Exact pattern match
+greppy exact "def process_payment"
+\`\`\`
+
+The index is already built. Just run the search commands directly.
+```
+
+### Quick Setup (Copy Files)
+
+Or simply copy the `.claude` folder from greppy:
+
+```bash
+cp -r /path/to/greppy/.claude /path/to/your/project/
+```
+
+Then restart Claude Code to load the settings.
+
+### How It Works
+
+**Layer 1: Skill (Proactive)** - The skill teaches Claude when to use greppy:
 ```
 "find authentication logic" → Skill matches → greppy search "authentication"
 ```
 
-**Layer 2: Hook (Reactive)**
-
-If Claude tries to use grep anyway, the hook blocks it:
+**Layer 2: Hook (Reactive)** - If Claude tries Grep anyway, it gets blocked:
 ```
 Claude tries Grep → BLOCKED → Message: "Use greppy instead" → Claude adapts
 ```
 
-### Setup Claude Code Integration
-
-Copy the `.claude` folder to your project:
-```bash
-cp -r /Users/dylan/Desktop/projects/greppy/.claude /path/to/your/project/
-```
-
-Or install globally:
-```bash
-cp -r /Users/dylan/Desktop/projects/greppy/.claude ~/.claude
-```
-
-Then restart Claude Code to load the Skill.
-
-### How It Works
-
-```
-You: "Find where errors are handled"
-         │
-         ▼
-┌─────────────────────────────┐
-│ Skill matches description   │  ← Layer 1 (proactive)
-│ "find code by meaning"      │
-└─────────────┬───────────────┘
-              │
-              ▼
-   Claude runs: greppy search "error handling"
-```
-
-If Claude tries grep anyway:
-
-```
-Claude tries: Grep("error")
-         │
-         ▼
-┌─────────────────────────────┐
-│ Hook blocks Grep            │  ← Layer 2 (reactive)
-│ Message: "Use greppy"       │
-└─────────────┬───────────────┘
-              │
-              ▼
-   Claude adapts: greppy search "error"
-```
-
-### Result
-
-- Claude **always** uses greppy instead of grep
-- Semantic search for concepts/intent
-- Exact search for specific patterns
-- Faster searches, fewer tokens
+**Layer 3: CLAUDE.md (Instruction)** - Explicit instruction to use greppy for all code search
 
 ## Data Storage
 
@@ -167,7 +219,7 @@ Greppy stores indexes in `~/.greppy/chroma/`. Each project gets its own collecti
 |-------|-----|
 | Ollama not running | `ollama serve` |
 | Model not found | `ollama pull nomic-embed-text` |
-| greppy not found | `pip install -e .` in greppy directory |
+| greppy not found | `brew tap dyoburon/greppy && brew install greppy` |
 | Index missing | `greppy index .` |
 | Skill not activating | Restart Claude Code |
 

@@ -2,9 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": {
-          "tools": ["Grep"]
-        },
+        "matcher": "Grep",
         "hooks": [
           {
             "type": "command",
