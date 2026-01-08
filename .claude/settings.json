@@ -1,20 +1,13 @@
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'BLOCKED: Use greppy instead. Run: greppy search \"query\" for semantic search, or greppy exact \"pattern\" for exact matches.' && exit 1"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(greppy:*)"
+    ],
+    "deny": [
+      "Glob",
+      "Grep",
+      "Read",
+      "Task(Explore)"
     ]
   }
 }

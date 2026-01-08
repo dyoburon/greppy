@@ -150,6 +150,75 @@ def exact(pattern: str, path: str):
 
 
 @main.command()
+@click.argument("location")
+@click.option("--context", "-c", default=50, help="Lines of context (default: 50)")
+def read(location: str, context: int):
+    """Read file contents with context around a line.
+
+    Usage:
+        greppy read src/auth.py              # Read first 50 lines
+        greppy read src/auth.py:45           # Read ~50 lines centered on line 45
+        greppy read src/auth.py:30-80        # Read lines 30-80
+        greppy read src/auth.py -c 100       # More context
+    """
+    # Parse location: file.py, file.py:line, or file.py:start-end
+    if ":" in location:
+        file_part, line_part = location.rsplit(":", 1)
+        if "-" in line_part:
+            # Range: file.py:30-80
+            start_str, end_str = line_part.split("-", 1)
+            try:
+                start_line = int(start_str)
+                end_line = int(end_str)
+            except ValueError:
+                console.print(f"[red]Invalid line range: {line_part}[/red]")
+                sys.exit(1)
+        else:
+            # Single line: file.py:45
+            try:
+                center_line = int(line_part)
+                half = context // 2
+                start_line = max(1, center_line - half)
+                end_line = center_line + half
+            except ValueError:
+                # Maybe it's part of the path (e.g., C:\path on Windows)
+                file_part = location
+                start_line = 1
+                end_line = context
+    else:
+        file_part = location
+        start_line = 1
+        end_line = context
+
+    file_path = Path(file_part)
+    if not file_path.exists():
+        console.print(f"[red]File not found: {file_part}[/red]")
+        sys.exit(1)
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except Exception as e:
+        console.print(f"[red]Error reading file: {e}[/red]")
+        sys.exit(1)
+
+    total_lines = len(lines)
+
+    # Clamp to file bounds
+    start_line = max(1, start_line)
+    end_line = min(total_lines, end_line)
+
+    # Print header
+    console.print(f"[dim]# {file_path} (lines {start_line}-{end_line} of {total_lines})[/dim]")
+
+    # Print lines with line numbers
+    for i in range(start_line - 1, end_line):
+        line_num = i + 1
+        line_content = lines[i].rstrip("\n\r")
+        print(f"{line_num:6}\t{line_content}")
+
+
+@main.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
 def status(path: str):
     """Check indexing status."""

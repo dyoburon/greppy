@@ -67,6 +67,7 @@ greppy index .
 greppy search "authentication logic"
 greppy search "error handling" -n 20
 greppy exact "TODO"  # Exact pattern match
+greppy read src/auth.py:45  # Read context around line 45
 ```
 
 ## Usage
@@ -92,6 +93,14 @@ greppy exact "def process_payment"
 greppy exact "import React" -p ./src
 ```
 
+### Read Files
+```bash
+greppy read src/auth.py              # Read first 50 lines
+greppy read src/auth.py:45           # Read ~50 lines centered on line 45
+greppy read src/auth.py:30-80        # Read lines 30-80
+greppy read src/auth.py -c 100       # Read 100 lines of context
+```
+
 ### Check Status
 ```bash
 greppy status
@@ -113,26 +122,21 @@ Create a `.claude` folder in your project with these files:
 
 ```json
 {
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'BLOCKED: Use greppy instead. Run: greppy search \"query\" for semantic search, or greppy exact \"pattern\" for exact matches.' && exit 1"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(greppy:*)"
+    ],
+    "deny": [
+      "Glob",
+      "Grep",
+      "Read",
+      "Task(Explore)"
     ]
   }
 }
 ```
+
+This blocks Claude's native search/read tools, forcing it to use greppy for all code operations.
 
 #### 2. `.claude/skills/code-search/SKILL.md`
 
@@ -140,14 +144,14 @@ Create a `.claude` folder in your project with these files:
 ---
 name: code-search
 description: Semantic code search for finding code by meaning. Use when searching for concepts, logic, patterns, or asking "where is X handled" or "find code that does Y".
-allowed-tools: Bash(greppy:*), Read, Glob
+allowed-tools: Bash(greppy:*)
 ---
 
 # Code Search Skill
 
 ## When to Use This Skill
 
-Use `greppy` for:
+Use `greppy search` for:
 - Finding code by concept ("authentication logic", "error handling")
 - Exploring unfamiliar codebases
 - Searching by intent, not exact text
@@ -155,6 +159,10 @@ Use `greppy` for:
 Use `greppy exact` for:
 - Specific strings, function names, imports
 - TODOs, FIXMEs, exact patterns
+
+Use `greppy read` for:
+- Reading file contents after finding a match
+- Viewing context around a specific line
 
 ## Commands
 
@@ -167,6 +175,12 @@ greppy search "your query" -n 10
 \`\`\`bash
 greppy exact "pattern"
 \`\`\`
+
+### Read File
+\`\`\`bash
+greppy read file.py:45    # Context around line 45
+greppy read file.py:30-80 # Lines 30-80
+\`\`\`
 ```
 
 #### 3. Add to `CLAUDE.md` (recommended)
@@ -176,7 +190,7 @@ Add this to your project's `CLAUDE.md` file:
 ```markdown
 ## Code Search - IMPORTANT
 
-**Always use `greppy` for searching code in this codebase.** Do NOT use Glob, Grep, find, or the Explore agent.
+**Always use `greppy` for all code operations in this codebase.** Do NOT use Glob, Grep, Read, or the Explore agent.
 
 \`\`\`bash
 # Semantic search (find by meaning/concept)
@@ -184,6 +198,9 @@ greppy search "authentication logic"
 
 # Exact pattern match
 greppy exact "def process_payment"
+
+# Read file contents
+greppy read src/auth.py:45
 \`\`\`
 
 The index is already built. Just run the search commands directly.
@@ -201,17 +218,17 @@ Then restart Claude Code to load the settings.
 
 ### How It Works
 
-**Layer 1: Skill (Proactive)** - The skill teaches Claude when to use greppy:
+**Layer 1: Permissions (Enforcement)** - Native tools are denied in settings.json:
+```
+Claude tries Grep/Glob/Read → DENIED → Must use greppy instead
+```
+
+**Layer 2: Skill (Guidance)** - The skill teaches Claude when and how to use greppy:
 ```
 "find authentication logic" → Skill matches → greppy search "authentication"
 ```
 
-**Layer 2: Hook (Reactive)** - If Claude tries Grep anyway, it gets blocked:
-```
-Claude tries Grep → BLOCKED → Message: "Use greppy instead" → Claude adapts
-```
-
-**Layer 3: CLAUDE.md (Instruction)** - Explicit instruction to use greppy for all code search
+**Layer 3: CLAUDE.md (Instruction)** - Explicit instruction to use greppy for all code operations
 
 ## Data Storage
 
