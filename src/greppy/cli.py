@@ -121,12 +121,15 @@ main.add_command(search_cmd, name="search")
 @main.command()
 @click.argument("pattern")
 @click.option("--limit", "-n", default=None, type=int, help="Max number of results")
+@click.option("--ignore-case", "-i", is_flag=True, help="Case-insensitive search")
 @click.option("--path", "-p", default=".", help="Path to search")
-def exact(pattern: str, limit: int, path: str):
+def exact(pattern: str, limit: int, ignore_case: bool, path: str):
     """Exact pattern search (uses ripgrep/grep)."""
     try:
         # Try ripgrep first
         cmd = ["rg", "-n", "--color=never", pattern, path]
+        if ignore_case:
+            cmd.insert(2, "-i")
         if limit:
             cmd.insert(2, f"--max-count={limit}")
         result = subprocess.run(
@@ -148,6 +151,8 @@ def exact(pattern: str, limit: int, path: str):
     except FileNotFoundError:
         # Fallback to grep
         cmd = ["grep", "-rn", pattern, path]
+        if ignore_case:
+            cmd.insert(2, "-i")
         if limit:
             cmd.insert(2, f"-m{limit}")
         result = subprocess.run(
