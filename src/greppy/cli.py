@@ -120,31 +120,47 @@ main.add_command(search_cmd, name="search")
 
 @main.command()
 @click.argument("pattern")
+@click.option("--limit", "-n", default=None, type=int, help="Max number of results")
 @click.option("--path", "-p", default=".", help="Path to search")
-def exact(pattern: str, path: str):
+def exact(pattern: str, limit: int, path: str):
     """Exact pattern search (uses ripgrep/grep)."""
     try:
         # Try ripgrep first
+        cmd = ["rg", "-n", "--color=never", pattern, path]
+        if limit:
+            cmd.insert(2, f"--max-count={limit}")
         result = subprocess.run(
-            ["rg", "-n", "--color=never", pattern, path],
+            cmd,
             capture_output=True,
             text=True,
         )
         if result.returncode == 0:
-            print(result.stdout)
+            output = result.stdout
+            if limit:
+                # Limit total lines of output
+                lines = output.strip().split("\n")
+                output = "\n".join(lines[:limit])
+            print(output)
         elif result.returncode == 1:
             print("No matches found.")
         else:
             raise FileNotFoundError()
     except FileNotFoundError:
         # Fallback to grep
+        cmd = ["grep", "-rn", pattern, path]
+        if limit:
+            cmd.insert(2, f"-m{limit}")
         result = subprocess.run(
-            ["grep", "-rn", pattern, path],
+            cmd,
             capture_output=True,
             text=True,
         )
         if result.stdout:
-            print(result.stdout)
+            output = result.stdout
+            if limit:
+                lines = output.strip().split("\n")
+                output = "\n".join(lines[:limit])
+            print(output)
         else:
             print("No matches found.")
 
