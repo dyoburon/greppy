@@ -76,8 +76,23 @@ greppy read src/auth.py:45  # Read context around line 45
 ```bash
 greppy index .
 greppy index /path/to/project
-greppy index . --force  # Reindex
+greppy index . --force  # Full reindex (normally incremental)
 ```
+
+### Watch for Changes (Auto-Index)
+```bash
+greppy watch                    # Watch current directory
+greppy watch /path/to/project   # Watch specific project
+greppy watch --debounce 10      # Wait 10s after last change (default: 5s)
+```
+
+The watch command monitors your codebase for file changes and automatically runs incremental indexing. It:
+- Watches only code files (.py, .ts, .js, etc.)
+- Ignores node_modules, .git, venv, etc.
+- Debounces changes (waits for you to stop typing)
+- Runs incremental index (only changed files)
+
+**Recommended:** Run `greppy watch` in a separate terminal while coding.
 
 ### Semantic Search
 ```bash
@@ -134,6 +149,9 @@ greppy read LOCATION
   file.py:45           # ~50 lines centered on line 45
   file.py:30-80        # Lines 30-80
   -c, --context INT    # Lines of context (default: 50)
+
+greppy watch [OPTIONS] [PATH]
+  -d, --debounce INT   # Seconds to wait after last change (default: 5)
 ```
 
 ### Check Status

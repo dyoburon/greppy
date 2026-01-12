@@ -304,5 +304,68 @@ def clear(path: str):
     console.print(f"[green]Index cleared for {project_path}[/green]")
 
 
+@main.command()
+@click.argument("path", default=".", type=click.Path(exists=True))
+@click.option("--debounce", "-d", default=5, help="Seconds to wait after last change (default: 5)")
+def watch(path: str, debounce: int):
+    """Watch for file changes and auto-index.
+
+    Monitors the codebase for changes to code files and automatically
+    runs incremental indexing after a debounce period.
+
+    Examples:
+        greppy watch                 # Watch current directory
+        greppy watch ./src           # Watch specific directory
+        greppy watch --debounce 10   # Wait 10s after last change
+    """
+    from .watcher import Watcher
+
+    project_path = Path(path).resolve()
+
+    # Check prerequisites
+    if not check_ollama():
+        console.print("[red]Error: Ollama is not running.[/red]")
+        console.print("Start it with: [cyan]ollama serve[/cyan]")
+        sys.exit(1)
+
+    if not check_model():
+        console.print("[red]Error: Model 'nomic-embed-text' not found.[/red]")
+        console.print("Pull it with: [cyan]ollama pull nomic-embed-text[/cyan]")
+        sys.exit(1)
+
+    # Ensure initial index exists
+    if not has_index(project_path):
+        console.print("[yellow]No index found. Creating initial index...[/yellow]")
+        chunks = list(chunk_codebase(project_path))
+        if chunks:
+            index_chunks(project_path, chunks)
+            console.print(f"[green]Initial index created with {len(chunks)} chunks.[/green]")
+
+    def on_change(proj_path: Path):
+        """Called when files change."""
+        added, modified, deleted = compute_changes(proj_path)
+        total_changes = len(added) + len(modified) + len(deleted)
+
+        if total_changes == 0:
+            return
+
+        console.print(f"[blue]Changes detected: +{len(added)} ~{len(modified)} -{len(deleted)} files[/blue]")
+        added_chunks, deleted_chunks, files_updated = index_incremental(proj_path)
+        stats = get_stats(proj_path)
+        console.print(f"[green]Indexed! +{added_chunks} -{deleted_chunks} chunks (total: {stats['chunks']})[/green]")
+
+    console.print(f"[green]Watching {project_path}[/green]")
+    console.print(f"[dim]Debounce: {debounce}s | Press Ctrl+C to stop[/dim]")
+
+    watcher = Watcher(project_path, on_change, debounce_seconds=float(debounce))
+    watcher.start()
+
+    try:
+        watcher.wait()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopping watcher...[/yellow]")
+        watcher.stop()
+
+
 if __name__ == "__main__":
     main()
