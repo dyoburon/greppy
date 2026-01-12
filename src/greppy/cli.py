@@ -10,7 +10,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import __version__
 from .embedder import check_ollama, check_model
-from .chunker import chunk_codebase
+from .chunker import chunk_codebase, SkippedFiles
 from .store import (
     index_chunks,
     index_incremental,
@@ -23,6 +23,33 @@ from .store import (
 )
 
 console = Console()
+
+
+def _print_skip_summary(skipped: SkippedFiles) -> None:
+    """Print summary of skipped files."""
+    if skipped.total() == 0:
+        return
+
+    console.print(f"\n[dim]Skipped {skipped.total()} files:[/dim]")
+
+    skip_reasons = [
+        ("large", "too large (>512KB)"),
+        ("binary", "binary files"),
+        ("minified", "minified files"),
+        ("empty", "empty files"),
+        ("encoding", "encoding errors"),
+        ("error", "read errors"),
+    ]
+
+    for key, label in skip_reasons:
+        files = getattr(skipped, key)
+        if files:
+            console.print(f"  [dim]{label}: {len(files)}[/dim]")
+            # Show first 3 files as examples
+            for f in files[:3]:
+                console.print(f"    [dim]- {f}[/dim]")
+            if len(files) > 3:
+                console.print(f"    [dim]  ...and {len(files) - 3} more[/dim]")
 
 
 @click.group()
@@ -62,17 +89,20 @@ def index(path: str, force: bool):
         else:
             console.print(f"[blue]Indexing {project_path}...[/blue]")
 
+        skipped = SkippedFiles()
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
             task = progress.add_task("Scanning files...", total=None)
-            chunks = list(chunk_codebase(project_path))
+            chunks = list(chunk_codebase(project_path, skipped=skipped))
             progress.update(task, description=f"Found {len(chunks)} chunks")
 
         if not chunks:
             console.print("[yellow]No files found to index.[/yellow]")
+            _print_skip_summary(skipped)
             return
 
         with Progress(
@@ -85,6 +115,7 @@ def index(path: str, force: bool):
             progress.update(task, description=f"Indexed {total} chunks")
 
         console.print(f"[green]Done! Indexed {total} chunks.[/green]")
+        _print_skip_summary(skipped)
 
     else:
         # Incremental index

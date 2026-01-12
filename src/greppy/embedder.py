@@ -1,30 +1,46 @@
 """Embeddings via Ollama."""
 
+import sys
 import requests
 from typing import List
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "nomic-embed-text"
 
+# Embedding dimension for nomic-embed-text
+EMBEDDING_DIM = 768
+
 
 def get_embeddings(texts: List[str], model: str = DEFAULT_MODEL) -> List[List[float]]:
-    """Get embeddings from Ollama."""
+    """Get embeddings from Ollama with robust error handling."""
     embeddings = []
 
-    for text in texts:
+    for i, text in enumerate(texts):
         try:
             # Truncate very long texts that may cause issues
             truncated = text[:8000] if len(text) > 8000 else text
+
             response = requests.post(
                 f"{OLLAMA_BASE_URL}/api/embeddings",
                 json={"model": model, "prompt": truncated},
                 timeout=60,
             )
             response.raise_for_status()
-            embeddings.append(response.json()["embedding"])
-        except requests.exceptions.RequestException:
-            # Return zero embedding for problematic texts
-            embeddings.append([0.0] * 768)
+
+            data = response.json()
+            embedding = data.get("embedding", [])
+
+            # Validate embedding is non-empty
+            if not embedding or len(embedding) == 0:
+                print(f"Warning: Empty embedding for chunk {i}, using zero vector", file=sys.stderr)
+                embeddings.append([0.0] * EMBEDDING_DIM)
+            else:
+                embeddings.append(embedding)
+
+        except Exception as e:
+            # Catch ALL exceptions - network, JSON parsing, KeyError, etc.
+            print(f"Warning: Embedding failed for chunk {i}: {e}, using zero vector", file=sys.stderr)
+            embeddings.append([0.0] * EMBEDDING_DIM)
 
     return embeddings
 
