@@ -11,7 +11,16 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from . import __version__
 from .embedder import check_ollama, check_model
 from .chunker import chunk_codebase
-from .store import index_chunks, search, clear_index, get_stats, has_index
+from .store import (
+    index_chunks,
+    index_incremental,
+    search,
+    clear_index,
+    get_stats,
+    has_index,
+    load_manifest,
+    compute_changes,
+)
 
 console = Console()
 
@@ -25,7 +34,7 @@ def main():
 
 @main.command()
 @click.argument("path", default=".", type=click.Path(exists=True))
-@click.option("--force", "-f", is_flag=True, help="Force reindex")
+@click.option("--force", "-f", is_flag=True, help="Force full reindex")
 def index(path: str, force: bool):
     """Index a codebase for semantic search."""
     project_path = Path(path).resolve()
@@ -41,42 +50,65 @@ def index(path: str, force: bool):
         console.print("Pull it with: [cyan]ollama pull nomic-embed-text[/cyan]")
         sys.exit(1)
 
-    # Check if already indexed
-    if has_index(project_path) and not force:
+    # Check if we have an existing index with manifest
+    has_existing = has_index(project_path)
+    has_manifest = bool(load_manifest(project_path))
+
+    # Decide: full index or incremental
+    if force or not has_existing or not has_manifest:
+        # Full reindex
+        if force:
+            console.print(f"[blue]Full reindex of {project_path}...[/blue]")
+        else:
+            console.print(f"[blue]Indexing {project_path}...[/blue]")
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Scanning files...", total=None)
+            chunks = list(chunk_codebase(project_path))
+            progress.update(task, description=f"Found {len(chunks)} chunks")
+
+        if not chunks:
+            console.print("[yellow]No files found to index.[/yellow]")
+            return
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Indexing...", total=None)
+            total = index_chunks(project_path, chunks)
+            progress.update(task, description=f"Indexed {total} chunks")
+
+        console.print(f"[green]Done! Indexed {total} chunks.[/green]")
+
+    else:
+        # Incremental index
+        added, modified, deleted = compute_changes(project_path)
+        total_changes = len(added) + len(modified) + len(deleted)
+
+        if total_changes == 0:
+            stats = get_stats(project_path)
+            console.print(f"[green]Index up to date ({stats['chunks']} chunks).[/green]")
+            return
+
+        console.print(f"[blue]Incremental update: {len(added)} new, {len(modified)} modified, {len(deleted)} deleted files[/blue]")
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Updating index...", total=None)
+            added_chunks, deleted_chunks, files_updated = index_incremental(project_path)
+            progress.update(task, description=f"Updated {files_updated} files")
+
         stats = get_stats(project_path)
-        console.print(f"[yellow]Index already exists with {stats['chunks']} chunks.[/yellow]")
-        console.print("Use [cyan]--force[/cyan] to reindex.")
-        return
-
-    console.print(f"[blue]Indexing {project_path}...[/blue]")
-
-    # Collect chunks
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Scanning files...", total=None)
-
-        chunks = list(chunk_codebase(project_path))
-        progress.update(task, description=f"Found {len(chunks)} chunks")
-
-    if not chunks:
-        console.print("[yellow]No files found to index.[/yellow]")
-        return
-
-    # Index chunks
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Indexing...", total=None)
-
-        total = index_chunks(project_path, chunks)
-        progress.update(task, description=f"Indexed {total} chunks")
-
-    console.print(f"[green]Done! Indexed {total} chunks.[/green]")
+        console.print(f"[green]Done! +{added_chunks} -{deleted_chunks} chunks (total: {stats['chunks']})[/green]")
 
 
 @main.command()
@@ -250,6 +282,13 @@ def status(path: str):
         console.print(f"[green]Index exists[/green]")
         console.print(f"  Project: {stats['project']}")
         console.print(f"  Chunks: {stats['chunks']}")
+
+        # Show pending changes
+        added, modified, deleted = compute_changes(project_path)
+        if added or modified or deleted:
+            console.print(f"  [yellow]Pending: +{len(added)} ~{len(modified)} -{len(deleted)} files[/yellow]")
+        else:
+            console.print(f"  [dim]Up to date[/dim]")
     else:
         console.print(f"[yellow]No index found[/yellow]")
         console.print(f"  Project: {stats['project']}")

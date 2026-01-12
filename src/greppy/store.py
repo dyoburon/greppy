@@ -1,18 +1,20 @@
 """ChromaDB vector store."""
 
+import json
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Set, Tuple
 
 import chromadb
 from chromadb.config import Settings
 
-from .chunker import CodeChunk
+from .chunker import CodeChunk, chunk_file, get_file_hashes
 from .embedder import get_embeddings, get_embedding
 
 # Store data in ~/.greppy
 GREPPY_DIR = Path.home() / ".greppy"
 CHROMA_DIR = GREPPY_DIR / "chroma"
+MANIFEST_DIR = GREPPY_DIR / "manifests"
 
 
 def get_collection_name(project_path: Path) -> str:
@@ -22,6 +24,30 @@ def get_collection_name(project_path: Path) -> str:
     path_hash = hashlib.md5(str(project_path.resolve()).encode()).hexdigest()[:8]
     name = project_path.name.replace("-", "_").replace(".", "_")[:20]
     return f"{name}_{path_hash}"
+
+
+def get_manifest_path(project_path: Path) -> Path:
+    """Get manifest file path for project."""
+    MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+    name = get_collection_name(project_path)
+    return MANIFEST_DIR / f"{name}.json"
+
+
+def load_manifest(project_path: Path) -> Dict[str, str]:
+    """Load file hash manifest."""
+    manifest_path = get_manifest_path(project_path)
+    if manifest_path.exists():
+        try:
+            return json.loads(manifest_path.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def save_manifest(project_path: Path, hashes: Dict[str, str]):
+    """Save file hash manifest."""
+    manifest_path = get_manifest_path(project_path)
+    manifest_path.write_text(json.dumps(hashes, indent=2))
 
 
 def get_client() -> chromadb.Client:
@@ -52,8 +78,32 @@ def has_index(project_path: Path) -> bool:
         return False
 
 
+def compute_changes(project_path: Path) -> Tuple[Set[str], Set[str], Set[str]]:
+    """Compute file changes since last index.
+
+    Returns: (new_files, modified_files, deleted_files)
+    """
+    old_hashes = load_manifest(project_path)
+    new_hashes = get_file_hashes(project_path)
+
+    old_files = set(old_hashes.keys())
+    new_files_set = set(new_hashes.keys())
+
+    # Find changes
+    added = new_files_set - old_files
+    deleted = old_files - new_files_set
+
+    # Find modified (same file, different hash)
+    modified = set()
+    for f in old_files & new_files_set:
+        if old_hashes[f] != new_hashes[f]:
+            modified.add(f)
+
+    return added, modified, deleted
+
+
 def index_chunks(project_path: Path, chunks: List[CodeChunk], batch_size: int = 50) -> int:
-    """Index chunks into ChromaDB."""
+    """Index chunks into ChromaDB (full reindex)."""
     collection = get_collection(project_path)
 
     # Clear existing data
@@ -81,7 +131,72 @@ def index_chunks(project_path: Path, chunks: List[CodeChunk], batch_size: int = 
         _index_batch(collection, batch)
         total_indexed += len(batch)
 
+    # Save manifest
+    hashes = get_file_hashes(project_path)
+    save_manifest(project_path, hashes)
+
     return total_indexed
+
+
+def index_incremental(project_path: Path, batch_size: int = 50) -> Tuple[int, int, int]:
+    """Incrementally index only changed files.
+
+    Returns: (added_chunks, updated_chunks, deleted_chunks)
+    """
+    collection = get_collection(project_path)
+
+    added_files, modified_files, deleted_files = compute_changes(project_path)
+
+    # Files that need re-indexing
+    files_to_index = added_files | modified_files
+
+    added_count = 0
+    deleted_count = 0
+
+    # Delete chunks for modified and deleted files
+    files_to_delete = modified_files | deleted_files
+    if files_to_delete:
+        try:
+            # Get all existing chunks
+            existing = collection.get(include=["metadatas"])
+            ids_to_delete = []
+            for i, meta in enumerate(existing["metadatas"]):
+                rel_path = str(Path(meta["file_path"]).relative_to(project_path))
+                if rel_path in files_to_delete:
+                    ids_to_delete.append(existing["ids"][i])
+
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                deleted_count = len(ids_to_delete)
+        except Exception:
+            pass
+
+    # Index new/modified files
+    if files_to_index:
+        chunks = []
+        for rel_path in files_to_index:
+            file_path = project_path / rel_path
+            if file_path.exists():
+                chunks.extend(chunk_file(file_path))
+
+        # Process in batches
+        batch = []
+        for chunk in chunks:
+            batch.append(chunk)
+            if len(batch) >= batch_size:
+                _index_batch(collection, batch)
+                added_count += len(batch)
+                batch = []
+
+        if batch:
+            _index_batch(collection, batch)
+            added_count += len(batch)
+
+    # Save updated manifest
+    hashes = get_file_hashes(project_path)
+    save_manifest(project_path, hashes)
+
+    return added_count, deleted_count, len(files_to_index)
 
 
 def _index_batch(collection, chunks: List[CodeChunk]):
@@ -141,6 +256,11 @@ def clear_index(project_path: Path):
         client.delete_collection(name)
     except Exception:
         pass
+
+    # Also clear manifest
+    manifest_path = get_manifest_path(project_path)
+    if manifest_path.exists():
+        manifest_path.unlink()
 
 
 def get_stats(project_path: Path) -> dict:

@@ -4,7 +4,7 @@ import os
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Generator
+from typing import List, Generator, Dict
 
 # File extensions to index
 CODE_EXTENSIONS = {
@@ -45,6 +45,15 @@ class CodeChunk:
 def hash_content(content: str) -> str:
     """Generate hash for content."""
     return hashlib.md5(content.encode()).hexdigest()[:12]
+
+
+def hash_file(file_path: Path) -> str:
+    """Generate hash for entire file content."""
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
+        return hashlib.md5(content.encode()).hexdigest()
+    except Exception:
+        return ""
 
 
 # Files to skip
@@ -138,3 +147,12 @@ def chunk_codebase(root_path: Path) -> Generator[CodeChunk, None, None]:
     for file_path in walk_codebase(root_path):
         for chunk in chunk_file(file_path):
             yield chunk
+
+
+def get_file_hashes(root_path: Path) -> Dict[str, str]:
+    """Get hash of each file in codebase."""
+    hashes = {}
+    for file_path in walk_codebase(root_path):
+        rel_path = str(file_path.relative_to(root_path))
+        hashes[rel_path] = hash_file(file_path)
+    return hashes
