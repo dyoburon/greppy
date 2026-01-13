@@ -1,7 +1,9 @@
 """ChromaDB vector store."""
 
+import gc
 import json
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional, Dict, Set, Tuple
 
@@ -10,6 +12,9 @@ from chromadb.config import Settings
 
 from .chunker import CodeChunk, chunk_file, get_file_hashes
 from .embedder import get_embeddings, get_embedding
+
+# Batch size for storing to ChromaDB (after embeddings computed)
+CHROMA_BATCH_SIZE = 500
 
 # Store data in ~/.greppy
 GREPPY_DIR = Path.home() / ".greppy"
@@ -102,8 +107,11 @@ def compute_changes(project_path: Path) -> Tuple[Set[str], Set[str], Set[str]]:
     return added, modified, deleted
 
 
-def index_chunks(project_path: Path, chunks: List[CodeChunk], batch_size: int = 50) -> int:
-    """Index chunks into ChromaDB (full reindex)."""
+def index_chunks(project_path: Path, chunks: List[CodeChunk]) -> int:
+    """Index chunks into ChromaDB (full reindex).
+
+    Embeds ALL chunks in one call for efficiency, then stores in batches.
+    """
     collection = get_collection(project_path)
 
     # Clear existing data
@@ -114,22 +122,41 @@ def index_chunks(project_path: Path, chunks: List[CodeChunk], batch_size: int = 
     except Exception:
         pass
 
+    if not chunks:
+        return 0
+
+    # Extract texts for embedding
+    texts = [c.content for c in chunks]
+
+    # Get ALL embeddings in one call (much faster than batched calls)
+    print(f"Embedding {len(texts)} chunks...", file=sys.stderr)
+    embeddings = get_embeddings(texts)
+
+    # Store to ChromaDB in batches (to avoid memory issues)
     total_indexed = 0
+    for i in range(0, len(chunks), CHROMA_BATCH_SIZE):
+        batch_end = min(i + CHROMA_BATCH_SIZE, len(chunks))
+        batch_chunks = chunks[i:batch_end]
+        batch_embeddings = embeddings[i:batch_end]
+        batch_texts = texts[i:batch_end]
 
-    # Process in batches
-    batch = []
-    for chunk in chunks:
-        batch.append(chunk)
+        collection.add(
+            ids=[c.id for c in batch_chunks],
+            embeddings=batch_embeddings,
+            documents=batch_texts,
+            metadatas=[
+                {
+                    "file_path": c.file_path,
+                    "start_line": c.start_line,
+                    "end_line": c.end_line,
+                }
+                for c in batch_chunks
+            ],
+        )
+        total_indexed += len(batch_chunks)
 
-        if len(batch) >= batch_size:
-            _index_batch(collection, batch)
-            total_indexed += len(batch)
-            batch = []
-
-    # Index remaining
-    if batch:
-        _index_batch(collection, batch)
-        total_indexed += len(batch)
+        # Free memory between batches
+        gc.collect()
 
     # Save manifest
     hashes = get_file_hashes(project_path)
@@ -138,10 +165,10 @@ def index_chunks(project_path: Path, chunks: List[CodeChunk], batch_size: int = 
     return total_indexed
 
 
-def index_incremental(project_path: Path, batch_size: int = 50) -> Tuple[int, int, int]:
+def index_incremental(project_path: Path) -> Tuple[int, int, int]:
     """Incrementally index only changed files.
 
-    Returns: (added_chunks, updated_chunks, deleted_chunks)
+    Returns: (added_chunks, deleted_chunks, files_updated)
     """
     collection = get_collection(project_path)
 
@@ -179,44 +206,38 @@ def index_incremental(project_path: Path, batch_size: int = 50) -> Tuple[int, in
             if file_path.exists():
                 chunks.extend(chunk_file(file_path))
 
-        # Process in batches
-        batch = []
-        for chunk in chunks:
-            batch.append(chunk)
-            if len(batch) >= batch_size:
-                _index_batch(collection, batch)
-                added_count += len(batch)
-                batch = []
+        if chunks:
+            # Get all embeddings in one call
+            texts = [c.content for c in chunks]
+            embeddings = get_embeddings(texts, show_progress=False)
 
-        if batch:
-            _index_batch(collection, batch)
-            added_count += len(batch)
+            # Store to ChromaDB in batches
+            for i in range(0, len(chunks), CHROMA_BATCH_SIZE):
+                batch_end = min(i + CHROMA_BATCH_SIZE, len(chunks))
+                batch_chunks = chunks[i:batch_end]
+                batch_embeddings = embeddings[i:batch_end]
+                batch_texts = texts[i:batch_end]
+
+                collection.add(
+                    ids=[c.id for c in batch_chunks],
+                    embeddings=batch_embeddings,
+                    documents=batch_texts,
+                    metadatas=[
+                        {
+                            "file_path": c.file_path,
+                            "start_line": c.start_line,
+                            "end_line": c.end_line,
+                        }
+                        for c in batch_chunks
+                    ],
+                )
+                added_count += len(batch_chunks)
 
     # Save updated manifest
     hashes = get_file_hashes(project_path)
     save_manifest(project_path, hashes)
 
     return added_count, deleted_count, len(files_to_index)
-
-
-def _index_batch(collection, chunks: List[CodeChunk]):
-    """Index a batch of chunks."""
-    texts = [c.content for c in chunks]
-    embeddings = get_embeddings(texts)
-
-    collection.add(
-        ids=[c.id for c in chunks],
-        embeddings=embeddings,
-        documents=texts,
-        metadatas=[
-            {
-                "file_path": c.file_path,
-                "start_line": c.start_line,
-                "end_line": c.end_line,
-            }
-            for c in chunks
-        ],
-    )
 
 
 def search(project_path: Path, query: str, limit: int = 10) -> List[dict]:

@@ -1,5 +1,6 @@
 """Embeddings via CodeRankEmbed (sentence-transformers)."""
 
+import gc
 import sys
 from typing import List
 
@@ -9,8 +10,11 @@ _model = None
 # Embedding dimension for CodeRankEmbed
 EMBEDDING_DIM = 768
 
-# Batch size for encoding
-BATCH_SIZE = 64
+# Internal batch size for model.encode() - smaller = less peak memory
+ENCODE_BATCH_SIZE = 32
+
+# Max characters per text (CodeRankEmbed has 8192 token context)
+MAX_TEXT_CHARS = 24000
 
 
 def _get_model():
@@ -29,19 +33,27 @@ def _get_model():
 
 def get_embeddings(
     texts: List[str],
-    batch_size: int = BATCH_SIZE,
+    batch_size: int = ENCODE_BATCH_SIZE,
     show_progress: bool = True,
 ) -> List[List[float]]:
-    """Get embeddings using CodeRankEmbed with true batching."""
+    """Get embeddings using CodeRankEmbed.
+
+    Pass ALL texts at once - this function handles batching internally
+    for optimal performance. Avoid calling this repeatedly with small lists.
+    """
     if not texts:
         return []
 
     model = _get_model()
 
-    # Truncate long texts (CodeRankEmbed has 8192 token context)
-    truncated = [text[:32000] if len(text) > 32000 else text for text in texts]
+    # Truncate long texts
+    truncated = [
+        text[:MAX_TEXT_CHARS] if len(text) > MAX_TEXT_CHARS else text
+        for text in texts
+    ]
 
-    # Encode with batching - this is truly parallel on GPU/CPU
+    # Encode with internal batching
+    # show_progress_bar shows one progress bar for all batches
     embeddings = model.encode(
         truncated,
         batch_size=batch_size,
@@ -50,7 +62,14 @@ def get_embeddings(
     )
 
     # Convert numpy arrays to lists for ChromaDB
-    return [emb.tolist() for emb in embeddings]
+    result = [emb.tolist() for emb in embeddings]
+
+    # Free numpy array memory
+    del embeddings
+    del truncated
+    gc.collect()
+
+    return result
 
 
 def get_embedding(text: str) -> List[float]:
@@ -66,3 +85,12 @@ def check_model() -> bool:
     except Exception as e:
         print(f"Failed to load model: {e}", file=sys.stderr)
         return False
+
+
+def unload_model():
+    """Unload model to free memory."""
+    global _model
+    if _model is not None:
+        del _model
+        _model = None
+        gc.collect()
