@@ -1,3 +1,3 @@
-"""Greppy - Semantic code search using ChromaDB + Ollama."""
+"""Greppy - Semantic code search using ChromaDB + CodeRankEmbed."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

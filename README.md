@@ -1,8 +1,8 @@
 # Greppy
 
-Semantic code search CLI using ChromaDB + Ollama. Integrates with Claude Code via Skills.
+Semantic code search CLI using ChromaDB + CodeRankEmbed. Integrates with Claude Code via Skills.
 
-**No Docker required.** Everything runs locally.
+**No Docker required. No Ollama required.** Everything runs locally with a bundled embedding model.
 
 ![Greppy Demo](experiment.gif)
 
@@ -11,26 +11,13 @@ Semantic code search CLI using ChromaDB + Ollama. Integrates with Claude Code vi
 ## Architecture
 
 ```
-Claude Code → Skill → greppy CLI → ChromaDB + Ollama
-                      (Python)     (embedded)  (local)
+Claude Code → Skill → greppy CLI → ChromaDB + CodeRankEmbed
+                      (Python)     (embedded)  (local model)
 ```
 
 ## Quick Start
 
-### 1. Install Ollama
-
-```bash
-# macOS
-brew install ollama
-
-# Start Ollama (keep running in background)
-ollama serve
-
-# Pull embedding model
-ollama pull nomic-embed-text
-```
-
-### 2. Install Greppy
+### 1. Install Greppy
 
 **Option A: Via Homebrew (recommended)**
 ```bash
@@ -48,20 +35,22 @@ pip install -e /path/to/greppy
 pipx install /path/to/greppy
 ```
 
-### 3. Verify Installation
+### 2. Verify Installation
 
 ```bash
 greppy --help
 ```
 
-### 4. Index Your Codebase
+### 3. Index Your Codebase
 
 ```bash
 cd /path/to/your/project
 greppy index .
 ```
 
-### 5. Search!
+The first time you index, greppy will download the CodeRankEmbed model (~500MB). This only happens once.
+
+### 4. Search!
 
 ```bash
 greppy search "authentication logic"
@@ -287,102 +276,27 @@ Claude tries Grep/Glob/Read → DENIED → Must use greppy instead
 
 Greppy stores indexes in `~/.greppy/chroma/`. Each project gets its own collection.
 
-## Keeping Ollama Running (Recommended)
-
-Ollama stops when your terminal closes or Mac sleeps. Here's how to keep it running automatically.
-
-### Option 1: Hammerspoon (macOS)
-
-If you use [Hammerspoon](https://www.hammerspoon.org/), add this to your `~/.hammerspoon/init.lua`:
-
-```lua
--- Ollama Keepalive
--- Ensures Ollama is always running for greppy
-
-local ollamaPath = "/opt/homebrew/bin/ollama"  -- Apple Silicon
--- local ollamaPath = "/usr/local/bin/ollama"  -- Intel Mac
-
-local function isOllamaRunning()
-    local output, status = hs.execute("pgrep -x ollama")
-    return status
-end
-
-local function startOllama()
-    if not isOllamaRunning() then
-        hs.task.new(ollamaPath, nil, {"serve"}):start()
-    end
-end
-
--- Start on launch
-startOllama()
-
--- Check every 5 minutes
-hs.timer.doEvery(300, startOllama)
-
--- Restart after wake from sleep
-hs.caffeinate.watcher.new(function(event)
-    if event == hs.caffeinate.watcher.systemDidWake then
-        hs.timer.doAfter(2, startOllama)
-    end
-end):start()
-```
-
-Then reload Hammerspoon: `hs -c "hs.reload()"`
-
-### Option 2: LaunchAgent (macOS)
-
-Create a LaunchAgent that auto-starts Ollama on login:
-
-```bash
-cat > ~/Library/LaunchAgents/com.ollama.serve.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.ollama.serve</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/homebrew/bin/ollama</string>
-        <string>serve</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-EOF
-
-launchctl load ~/Library/LaunchAgents/com.ollama.serve.plist
-```
-
-### Option 3: Ollama Desktop App
-
-Download from [ollama.com](https://ollama.com). The desktop app runs as a menu bar item and auto-starts on login.
-
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Ollama not running | `ollama serve` (or see "Keeping Ollama Running" above) |
-| Model not found | `ollama pull nomic-embed-text` |
 | greppy not found | `brew tap dyoburon/greppy && brew install greppy` |
 | Index missing | `greppy index .` |
 | Skill not activating | Restart Claude Code |
+| Model download slow | First run downloads ~500MB model. Wait for completion. |
 
 ## Cost
 
 | Component | Cost |
 |-----------|------|
 | ChromaDB | $0 (embedded, local) |
-| Ollama | $0 (local) |
+| CodeRankEmbed | $0 (local model) |
 | **Total** | **$0** |
 
 ## Tech Stack
 
 - **ChromaDB**: Embedded vector database (no server)
-- **Ollama**: Local embeddings via nomic-embed-text
+- **CodeRankEmbed**: Local code embeddings via sentence-transformers (137M params, optimized for code)
 - **Python**: Simple, portable CLI
 
 ## Experiments
@@ -405,4 +319,4 @@ Task: Find all code related to chart generation logic in the datafeeds project.
 
 **Without Greppy**, the LLM has to *read actual file contents* to understand what's in them. It issues Glob/Grep commands, reads files, processes them, searches more, reads more files. All that file content goes into the context window, burning through tokens. The LLM is essentially reading your entire codebase to find what it's looking for.
 
-**With Greppy**, Ollama does the semantic search *locally* (free, no tokens). ChromaDB returns relevant file paths and snippets. The LLM only sees the search results—a few lines per match—not entire files.
+**With Greppy**, CodeRankEmbed does the semantic search *locally* (free, no tokens). ChromaDB returns relevant file paths and snippets. The LLM only sees the search results—a few lines per match—not entire files.

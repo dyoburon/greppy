@@ -1,9 +1,9 @@
 [project]
 name = "greppy"
-version = "0.4.0"
-description = "Semantic code search CLI using ChromaDB + Ollama"
+version = "0.5.0"
+description = "Semantic code search CLI using ChromaDB + CodeRankEmbed"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "chromadb>=0.4.0",
     "click>=8.0",
@@ -11,6 +11,8 @@ dependencies = [
     "tree-sitter>=0.20.0",
     "requests>=2.28.0",
     "watchdog>=4.0.0",
+    "sentence-transformers>=5.2.0",
+    "torch>=2.0.0",
 ]
 
 [project.scripts]

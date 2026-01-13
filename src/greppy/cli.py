@@ -9,7 +9,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import __version__
-from .embedder import check_ollama, check_model
 from .chunker import chunk_codebase, SkippedFiles
 from .store import (
     index_chunks,
@@ -55,7 +54,7 @@ def _print_skip_summary(skipped: SkippedFiles) -> None:
 @click.group()
 @click.version_option(version=__version__)
 def main():
-    """Greppy - Semantic code search powered by ChromaDB + Ollama."""
+    """Greppy - Semantic code search powered by ChromaDB + CodeRankEmbed."""
     pass
 
 
@@ -65,17 +64,6 @@ def main():
 def index(path: str, force: bool):
     """Index a codebase for semantic search."""
     project_path = Path(path).resolve()
-
-    # Check prerequisites
-    if not check_ollama():
-        console.print("[red]Error: Ollama is not running.[/red]")
-        console.print("Start it with: [cyan]ollama serve[/cyan]")
-        sys.exit(1)
-
-    if not check_model():
-        console.print("[red]Error: Model 'nomic-embed-text' not found.[/red]")
-        console.print("Pull it with: [cyan]ollama pull nomic-embed-text[/cyan]")
-        sys.exit(1)
 
     # Check if we have an existing index with manifest
     has_existing = has_index(project_path)
@@ -149,12 +137,6 @@ def index(path: str, force: bool):
 def search_cmd(query: str, limit: int, path: str):
     """Semantic search across indexed codebase."""
     project_path = Path(path).resolve()
-
-    # Check prerequisites
-    if not check_ollama():
-        console.print("[red]Error: Ollama is not running.[/red]")
-        console.print("Start it with: [cyan]ollama serve[/cyan]")
-        sys.exit(1)
 
     if not has_index(project_path):
         console.print("[yellow]Codebase not indexed.[/yellow]")
@@ -352,17 +334,6 @@ def watch(path: str, debounce: int):
     from .watcher import Watcher
 
     project_path = Path(path).resolve()
-
-    # Check prerequisites
-    if not check_ollama():
-        console.print("[red]Error: Ollama is not running.[/red]")
-        console.print("Start it with: [cyan]ollama serve[/cyan]")
-        sys.exit(1)
-
-    if not check_model():
-        console.print("[red]Error: Model 'nomic-embed-text' not found.[/red]")
-        console.print("Pull it with: [cyan]ollama pull nomic-embed-text[/cyan]")
-        sys.exit(1)
 
     # Ensure initial index exists
     if not has_index(project_path):
