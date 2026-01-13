@@ -1,4 +1,4 @@
-"""Embeddings via CodeRankEmbed (sentence-transformers)."""
+"""Embeddings via sentence-transformers with Apple Silicon acceleration."""
 
 import gc
 import sys
@@ -7,14 +7,27 @@ from typing import List
 # Lazy load to avoid slow import on every CLI call
 _model = None
 
-# Embedding dimension for CodeRankEmbed
-EMBEDDING_DIM = 768
+# Model to use - all-MiniLM-L6-v2 is fast and good quality
+MODEL_NAME = "all-MiniLM-L6-v2"
 
-# Internal batch size for model.encode() - smaller = less peak memory
-ENCODE_BATCH_SIZE = 32
+# Embedding dimension for all-MiniLM-L6-v2
+EMBEDDING_DIM = 384
 
-# Max characters per text (CodeRankEmbed has 8192 token context)
-MAX_TEXT_CHARS = 24000
+# Batch size for encoding
+ENCODE_BATCH_SIZE = 128
+
+# Max characters per text
+MAX_TEXT_CHARS = 8000
+
+
+def _get_device():
+    """Get best available device."""
+    import torch
+    if torch.backends.mps.is_available():
+        return "mps"  # Apple Silicon GPU
+    elif torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 def _get_model():
@@ -22,11 +35,11 @@ def _get_model():
     global _model
     if _model is None:
         from sentence_transformers import SentenceTransformer
-        print("Loading CodeRankEmbed model...", file=sys.stderr)
-        _model = SentenceTransformer(
-            "cornstack/CodeRankEmbed",
-            trust_remote_code=True,
-        )
+
+        device = _get_device()
+        print(f"Loading {MODEL_NAME} on {device}...", file=sys.stderr)
+
+        _model = SentenceTransformer(MODEL_NAME, device=device)
         print("Model loaded.", file=sys.stderr)
     return _model
 
@@ -36,10 +49,9 @@ def get_embeddings(
     batch_size: int = ENCODE_BATCH_SIZE,
     show_progress: bool = True,
 ) -> List[List[float]]:
-    """Get embeddings using CodeRankEmbed.
+    """Get embeddings with hardware acceleration.
 
-    Pass ALL texts at once - this function handles batching internally
-    for optimal performance. Avoid calling this repeatedly with small lists.
+    Pass ALL texts at once for optimal performance.
     """
     if not texts:
         return []
@@ -52,8 +64,7 @@ def get_embeddings(
         for text in texts
     ]
 
-    # Encode with internal batching
-    # show_progress_bar shows one progress bar for all batches
+    # Encode with batching
     embeddings = model.encode(
         truncated,
         batch_size=batch_size,
@@ -61,10 +72,10 @@ def get_embeddings(
         convert_to_numpy=True,
     )
 
-    # Convert numpy arrays to lists for ChromaDB
+    # Convert to lists for ChromaDB
     result = [emb.tolist() for emb in embeddings]
 
-    # Free numpy array memory
+    # Free memory
     del embeddings
     del truncated
     gc.collect()
