@@ -163,6 +163,21 @@ def search_cmd(query: str, limit: int, path: str):
 main.add_command(search_cmd, name="search")
 
 
+def _truncate_line(line: str, max_length: int = 1000) -> str:
+    """Truncate a line if it exceeds max_length, preserving the file:line: prefix."""
+    if len(line) <= max_length:
+        return line
+    # Try to preserve the file:line: prefix
+    colon_pos = line.find(":", line.find(":") + 1)  # Find second colon
+    if colon_pos > 0 and colon_pos < 200:
+        prefix = line[:colon_pos + 1]
+        content = line[colon_pos + 1:]
+        remaining = max_length - len(prefix) - 20  # Reserve space for truncation indicator
+        if remaining > 0:
+            return f"{prefix}{content[:remaining]}... [truncated]"
+    return f"{line[:max_length - 15]}... [truncated]"
+
+
 @main.command()
 @click.argument("pattern")
 @click.option("--limit", "-n", default=None, type=int, help="Max number of results")
@@ -183,12 +198,12 @@ def exact(pattern: str, limit: int, ignore_case: bool, path: str):
             text=True,
         )
         if result.returncode == 0:
-            output = result.stdout
+            lines = result.stdout.strip().split("\n")
             if limit:
-                # Limit total lines of output
-                lines = output.strip().split("\n")
-                output = "\n".join(lines[:limit])
-            print(output)
+                lines = lines[:limit]
+            # Truncate long lines (e.g., minified JSON)
+            lines = [_truncate_line(line) for line in lines]
+            print("\n".join(lines))
         elif result.returncode == 1:
             print("No matches found.")
         else:
@@ -206,11 +221,12 @@ def exact(pattern: str, limit: int, ignore_case: bool, path: str):
             text=True,
         )
         if result.stdout:
-            output = result.stdout
+            lines = result.stdout.strip().split("\n")
             if limit:
-                lines = output.strip().split("\n")
-                output = "\n".join(lines[:limit])
-            print(output)
+                lines = lines[:limit]
+            # Truncate long lines (e.g., minified JSON)
+            lines = [_truncate_line(line) for line in lines]
+            print("\n".join(lines))
         else:
             print("No matches found.")
 

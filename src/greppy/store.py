@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Set, Tuple
 import chromadb
 from chromadb.config import Settings
 
-from .chunker import CodeChunk, chunk_file, get_file_hashes
+from .chunker import CodeChunk, chunk_file, get_file_hashes, should_index_file, is_valid_file
 from .embedder import get_embeddings, get_embedding
 
 # Batch size for storing to ChromaDB (after embeddings computed)
@@ -203,8 +203,15 @@ def index_incremental(project_path: Path) -> Tuple[int, int, int]:
         chunks = []
         for rel_path in files_to_index:
             file_path = project_path / rel_path
-            if file_path.exists():
-                chunks.extend(chunk_file(file_path))
+            if not file_path.exists():
+                continue
+            # Apply same filters as full index
+            if not should_index_file(file_path):
+                continue
+            valid, reason = is_valid_file(file_path)
+            if not valid:
+                continue
+            chunks.extend(chunk_file(file_path))
 
         if chunks:
             # Get all embeddings in one call
