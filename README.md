@@ -1,6 +1,6 @@
 # Greppy
 
-Semantic code search CLI using ChromaDB + CodeRankEmbed. Integrates with Claude Code via Skills.
+Semantic code search CLI using ChromaDB + sentence-transformers. Integrates with Claude Code via Skills.
 
 **No Docker required. No Ollama required.** Everything runs locally with a bundled embedding model.
 
@@ -11,8 +11,8 @@ Semantic code search CLI using ChromaDB + CodeRankEmbed. Integrates with Claude 
 ## Architecture
 
 ```
-Claude Code → Skill → greppy CLI → ChromaDB + CodeRankEmbed
-                      (Python)     (embedded)  (local model)
+Claude Code → Skill → greppy CLI → ChromaDB + MiniLM
+                      (Python)     (embedded)  (MPS accelerated)
 ```
 
 ## Quick Start
@@ -48,7 +48,7 @@ cd /path/to/your/project
 greppy index .
 ```
 
-The first time you index, greppy will download the CodeRankEmbed model (~500MB). This only happens once.
+The first time you index, greppy will download the embedding model (~90MB). This only happens once. Indexing ~20k chunks takes ~2 minutes with Apple Silicon GPU acceleration.
 
 ### 4. Search!
 
@@ -290,13 +290,13 @@ Greppy stores indexes in `~/.greppy/chroma/`. Each project gets its own collecti
 | Component | Cost |
 |-----------|------|
 | ChromaDB | $0 (embedded, local) |
-| CodeRankEmbed | $0 (local model) |
+| MiniLM embeddings | $0 (local model) |
 | **Total** | **$0** |
 
 ## Tech Stack
 
 - **ChromaDB**: Embedded vector database (no server)
-- **CodeRankEmbed**: Local code embeddings via sentence-transformers (137M params, optimized for code)
+- **all-MiniLM-L6-v2**: Fast local embeddings via sentence-transformers (22M params, MPS accelerated)
 - **Python**: Simple, portable CLI
 
 ## Experiments
@@ -319,4 +319,4 @@ Task: Find all code related to chart generation logic in the datafeeds project.
 
 **Without Greppy**, the LLM has to *read actual file contents* to understand what's in them. It issues Glob/Grep commands, reads files, processes them, searches more, reads more files. All that file content goes into the context window, burning through tokens. The LLM is essentially reading your entire codebase to find what it's looking for.
 
-**With Greppy**, CodeRankEmbed does the semantic search *locally* (free, no tokens). ChromaDB returns relevant file paths and snippets. The LLM only sees the search results—a few lines per match—not entire files.
+**With Greppy**, the embedding model does semantic search *locally* (free, no tokens). ChromaDB returns relevant file paths and snippets. The LLM only sees the search results—a few lines per match—not entire files.
