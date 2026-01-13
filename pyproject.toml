@@ -1,6 +1,6 @@
 [project]
 name = "greppy"
-version = "0.3.1"
+version = "0.4.0"
 description = "Semantic code search CLI using ChromaDB + Ollama"
 readme = "README.md"
 requires-python = ">=3.9"

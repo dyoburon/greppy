@@ -2,7 +2,8 @@
 
 import sys
 import requests
-from typing import List
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Tuple
 
 OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "nomic-embed-text"
@@ -10,39 +11,59 @@ DEFAULT_MODEL = "nomic-embed-text"
 # Embedding dimension for nomic-embed-text
 EMBEDDING_DIM = 768
 
+# Max parallel requests to Ollama
+MAX_WORKERS = 10
 
-def get_embeddings(texts: List[str], model: str = DEFAULT_MODEL) -> List[List[float]]:
-    """Get embeddings from Ollama with robust error handling."""
-    embeddings = []
 
-    for i, text in enumerate(texts):
-        try:
-            # Truncate very long texts that may cause issues
-            truncated = text[:8000] if len(text) > 8000 else text
+def _embed_single(args: Tuple[int, str, str]) -> Tuple[int, List[float]]:
+    """Embed a single text. Returns (index, embedding) for ordering."""
+    i, text, model = args
 
-            response = requests.post(
-                f"{OLLAMA_BASE_URL}/api/embeddings",
-                json={"model": model, "prompt": truncated},
-                timeout=60,
-            )
-            response.raise_for_status()
+    try:
+        truncated = text[:8000] if len(text) > 8000 else text
 
-            data = response.json()
-            embedding = data.get("embedding", [])
+        response = requests.post(
+            f"{OLLAMA_BASE_URL}/api/embeddings",
+            json={"model": model, "prompt": truncated},
+            timeout=60,
+        )
+        response.raise_for_status()
 
-            # Validate embedding is non-empty
-            if not embedding or len(embedding) == 0:
-                print(f"Warning: Empty embedding for chunk {i}, using zero vector", file=sys.stderr)
-                embeddings.append([0.0] * EMBEDDING_DIM)
-            else:
-                embeddings.append(embedding)
+        data = response.json()
+        embedding = data.get("embedding", [])
 
-        except Exception as e:
-            # Catch ALL exceptions - network, JSON parsing, KeyError, etc.
-            print(f"Warning: Embedding failed for chunk {i}: {e}, using zero vector", file=sys.stderr)
-            embeddings.append([0.0] * EMBEDDING_DIM)
+        if not embedding or len(embedding) == 0:
+            print(f"Warning: Empty embedding for chunk {i}, using zero vector", file=sys.stderr)
+            return (i, [0.0] * EMBEDDING_DIM)
 
-    return embeddings
+        return (i, embedding)
+
+    except Exception as e:
+        print(f"Warning: Embedding failed for chunk {i}: {e}, using zero vector", file=sys.stderr)
+        return (i, [0.0] * EMBEDDING_DIM)
+
+
+def get_embeddings(
+    texts: List[str],
+    model: str = DEFAULT_MODEL,
+    max_workers: int = MAX_WORKERS,
+) -> List[List[float]]:
+    """Get embeddings from Ollama with parallel requests."""
+    if not texts:
+        return []
+
+    # Prepare args: (index, text, model)
+    args = [(i, text, model) for i, text in enumerate(texts)]
+
+    # Process in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_embed_single, args))
+
+    # Sort by index to maintain order
+    results.sort(key=lambda x: x[0])
+
+    # Extract embeddings
+    return [embedding for _, embedding in results]
 
 
 def get_embedding(text: str, model: str = DEFAULT_MODEL) -> List[float]:
